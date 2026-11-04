@@ -1,9 +1,0 @@
-name: Cache reusable caller
-on:
-  workflow_dispatch:
-jobs:
-  call:
-    uses: ./.github/workflows/cache-reusable-ctm-d5e91454c75b.yml
-    with:
-      key: "ctm-d5e91454c75b-base-exact"
-      expected_sha: 043e7502234fb084f495bd9683b9acef5623a16978d189b94a98d29dc92670a0
