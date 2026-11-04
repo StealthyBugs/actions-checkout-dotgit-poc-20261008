@@ -1,0 +1,435 @@
+name: Cache trust ctr-5f8e6a40e62a
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, edited, reopened]
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+    inputs:
+      operation:
+        required: true
+        type: string
+      key:
+        required: false
+        type: string
+      marker:
+        required: false
+        type: string
+      expected_sha:
+        required: false
+        type: string
+      restore_keys:
+        required: false
+        type: string
+      case:
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  base-seed:
+    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'base_seed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Prepare base exact
+        shell: bash
+        env:
+          MARKER: "ctr-5f8e6a40e62a-marker-base_exact-e932afb958"
+        run: |
+          rm -rf "$RUNNER_TEMP/cache-boundary"
+          mkdir -p "$RUNNER_TEMP/cache-boundary"
+          printf '%s' "$MARKER" > "$RUNNER_TEMP/cache-boundary/marker"
+      - name: Save base exact
+        continue-on-error: true
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/cache-boundary
+          key: "ctr-5f8e6a40e62a-base-exact"
+      - name: Prepare base case
+        shell: bash
+        env:
+          MARKER: "ctr-5f8e6a40e62a-marker-base_case-0d0e03457e"
+        run: |
+          rm -rf "$RUNNER_TEMP/cache-boundary"
+          mkdir -p "$RUNNER_TEMP/cache-boundary"
+          printf '%s' "$MARKER" > "$RUNNER_TEMP/cache-boundary/marker"
+      - name: Save base case
+        continue-on-error: true
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/cache-boundary
+          key: "ctr-5f8e6a40e62a-base-CaseFold"
+      - name: Prepare base unicode
+        shell: bash
+        env:
+          MARKER: "ctr-5f8e6a40e62a-marker-base_unicode-23aa77e859"
+        run: |
+          rm -rf "$RUNNER_TEMP/cache-boundary"
+          mkdir -p "$RUNNER_TEMP/cache-boundary"
+          printf '%s' "$MARKER" > "$RUNNER_TEMP/cache-boundary/marker"
+      - name: Save base unicode
+        continue-on-error: true
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/cache-boundary
+          key: "ctr-5f8e6a40e62a-base-unicod\u00e9"
+      - name: Prepare base prefix
+        shell: bash
+        env:
+          MARKER: "ctr-5f8e6a40e62a-marker-base_prefix-13aead8d18"
+        run: |
+          rm -rf "$RUNNER_TEMP/cache-boundary"
+          mkdir -p "$RUNNER_TEMP/cache-boundary"
+          printf '%s' "$MARKER" > "$RUNNER_TEMP/cache-boundary/marker"
+      - name: Save base prefix
+        continue-on-error: true
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/cache-boundary
+          key: "ctr-5f8e6a40e62a-base-prefix-leaf"
+
+  base-verify:
+    needs: base-seed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - case: base_exact
+            key: "ctr-5f8e6a40e62a-base-exact"
+            restore_keys: ""
+            expected_sha: bdd26530ab5752c34148d4f7571f963a3bb7dd32be49e0b3b9e909127c791d57
+          - case: base_casefold_miss
+            key: "ctr-5f8e6a40e62a-base-casefold"
+            restore_keys: ""
+            expected_sha: 30989cd445c60a6672df5ebbaf8fb9a5649e5f3521d353a81bdf942c914a2384
+          - case: base_unicode_miss
+            key: "ctr-5f8e6a40e62a-base-unicode\u0301"
+            restore_keys: ""
+            expected_sha: 86874a562a71a26326e75b7f7206d305bcb9ea4744e5a952a980d6f4caf490ff
+          - case: base_prefix_restore
+            key: "ctr-5f8e6a40e62a-base-prefix-missing"
+            restore_keys: "ctr-5f8e6a40e62a-base-prefix-"
+            expected_sha: 17c7ef9dbf8d687c74652def3f819fd097a5af22b4378d865d200e227703c0f4
+    steps:
+      - run: rm -rf "$RUNNER_TEMP/cache-boundary"
+      - id: restore
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/cache-boundary
+          key: ${{ matrix.key }}
+          restore-keys: ${{ matrix.restore_keys }}
+      - if: always()
+        shell: bash
+        env:
+          CASE: ${{ matrix.case }}
+          CACHE_KEY: ${{ matrix.key }}
+          CACHE_HIT: ${{ steps.restore.outputs.cache-hit }}
+          EXPECTED_SHA: ${{ matrix.expected_sha }}
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib
+          p=pathlib.Path(os.environ["RUNNER_TEMP"])/"cache-boundary"/"marker"
+          raw=p.read_bytes() if p.exists() and p.is_file() else b""
+          present=bool(raw)
+          actual=hashlib.sha256(raw).hexdigest() if present else None
+          expected=os.environ.get("EXPECTED_SHA") or None
+          out={"schema":"cache-trust-result/v1","case":os.environ["CASE"],"cache_hit":os.environ.get("CACHE_HIT","") or "","present":present,"file_sha256":actual,"expected_sha256":expected,"expected_match":bool(present and expected and actual==expected),"key_sha256":hashlib.sha256(os.environ["CACHE_KEY"].encode()).hexdigest(),"event":os.environ["GITHUB_EVENT_NAME"],"ref_sha256":hashlib.sha256(os.environ["GITHUB_REF"].encode()).hexdigest(),"run_attempt":int(os.environ["GITHUB_RUN_ATTEMPT"]),"raw_bytes_retained":False,"restored_bytes_executed":False}
+          print("CACHE_RESULT "+json.dumps(out,sort_keys=True,separators=(",",":")))
+          PY
+
+  single-produce:
+    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'single_produce'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - shell: bash
+        env:
+          MARKER: ${{ inputs.marker }}
+        run: |
+          rm -rf "$RUNNER_TEMP/cache-boundary"
+          mkdir -p "$RUNNER_TEMP/cache-boundary"
+          printf '%s' "$MARKER" > "$RUNNER_TEMP/cache-boundary/marker"
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/cache-boundary
+          key: ${{ inputs.key }}
+
+  single-consume:
+    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'single_consume'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: rm -rf "$RUNNER_TEMP/cache-boundary"
+      - id: restore
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/cache-boundary
+          key: ${{ inputs.key }}
+          restore-keys: ${{ inputs.restore_keys }}
+      - if: always()
+        shell: bash
+        env:
+          CASE: ${{ inputs.case }}
+          CACHE_KEY: ${{ inputs.key }}
+          CACHE_HIT: ${{ steps.restore.outputs.cache-hit }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib
+          p=pathlib.Path(os.environ["RUNNER_TEMP"])/"cache-boundary"/"marker"
+          raw=p.read_bytes() if p.exists() and p.is_file() else b""
+          present=bool(raw)
+          actual=hashlib.sha256(raw).hexdigest() if present else None
+          expected=os.environ.get("EXPECTED_SHA") or None
+          out={"schema":"cache-trust-result/v1","case":os.environ["CASE"],"cache_hit":os.environ.get("CACHE_HIT","") or "","present":present,"file_sha256":actual,"expected_sha256":expected,"expected_match":bool(present and expected and actual==expected),"key_sha256":hashlib.sha256(os.environ["CACHE_KEY"].encode()).hexdigest(),"event":os.environ["GITHUB_EVENT_NAME"],"ref_sha256":hashlib.sha256(os.environ["GITHUB_REF"].encode()).hexdigest(),"run_attempt":int(os.environ["GITHUB_RUN_ATTEMPT"]),"raw_bytes_retained":False,"restored_bytes_executed":False}
+          print("CACHE_RESULT "+json.dumps(out,sort_keys=True,separators=(",",":")))
+          PY
+
+  pr-produce:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Prepare pr exact
+        shell: bash
+        env:
+          MARKER: "ctr-5f8e6a40e62a-marker-pr_exact-7077c540bb"
+        run: |
+          rm -rf "$RUNNER_TEMP/cache-boundary"
+          mkdir -p "$RUNNER_TEMP/cache-boundary"
+          printf '%s' "$MARKER" > "$RUNNER_TEMP/cache-boundary/marker"
+      - name: Save pr exact
+        continue-on-error: true
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/cache-boundary
+          key: "ctr-5f8e6a40e62a-pr-exact"
+      - name: Prepare pr case
+        shell: bash
+        env:
+          MARKER: "ctr-5f8e6a40e62a-marker-pr_case-828c53d891"
+        run: |
+          rm -rf "$RUNNER_TEMP/cache-boundary"
+          mkdir -p "$RUNNER_TEMP/cache-boundary"
+          printf '%s' "$MARKER" > "$RUNNER_TEMP/cache-boundary/marker"
+      - name: Save pr case
+        continue-on-error: true
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/cache-boundary
+          key: "ctr-5f8e6a40e62a-pr-CaseFold"
+      - name: Prepare pr unicode
+        shell: bash
+        env:
+          MARKER: "ctr-5f8e6a40e62a-marker-pr_unicode-39e1471688"
+        run: |
+          rm -rf "$RUNNER_TEMP/cache-boundary"
+          mkdir -p "$RUNNER_TEMP/cache-boundary"
+          printf '%s' "$MARKER" > "$RUNNER_TEMP/cache-boundary/marker"
+      - name: Save pr unicode
+        continue-on-error: true
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/cache-boundary
+          key: "ctr-5f8e6a40e62a-pr-unicod\u00e9"
+      - name: Prepare pr prefix
+        shell: bash
+        env:
+          MARKER: "ctr-5f8e6a40e62a-marker-pr_prefix-b9adef7b80"
+        run: |
+          rm -rf "$RUNNER_TEMP/cache-boundary"
+          mkdir -p "$RUNNER_TEMP/cache-boundary"
+          printf '%s' "$MARKER" > "$RUNNER_TEMP/cache-boundary/marker"
+      - name: Save pr prefix
+        continue-on-error: true
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/cache-boundary
+          key: "ctr-5f8e6a40e62a-pr-prefix-leaf"
+      - name: Prepare pr head
+        shell: bash
+        env:
+          MARKER: "ctr-5f8e6a40e62a-marker-pr_head-cf0b00ed41"
+        run: |
+          rm -rf "$RUNNER_TEMP/cache-boundary"
+          mkdir -p "$RUNNER_TEMP/cache-boundary"
+          printf '%s' "$MARKER" > "$RUNNER_TEMP/cache-boundary/marker"
+      - name: Save pr head
+        continue-on-error: true
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/cache-boundary
+          key: "ctr-5f8e6a40e62a-pr-head-${{ github.event.pull_request.head.sha }}"
+      - name: Prepare pr merge
+        shell: bash
+        env:
+          MARKER: "ctr-5f8e6a40e62a-marker-pr_merge-f2e5e8da55"
+        run: |
+          rm -rf "$RUNNER_TEMP/cache-boundary"
+          mkdir -p "$RUNNER_TEMP/cache-boundary"
+          printf '%s' "$MARKER" > "$RUNNER_TEMP/cache-boundary/marker"
+      - name: Save pr merge
+        continue-on-error: true
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/cache-boundary
+          key: "ctr-5f8e6a40e62a-pr-merge-${{ github.sha }}"
+
+  pr-verify:
+    if: github.event_name == 'pull_request'
+    needs: pr-produce
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - case: pr_exact
+            key: "ctr-5f8e6a40e62a-pr-exact"
+            restore_keys: ""
+            expected_sha: 4e02c797212504d7f66b4d280b7b486d6c3ceaa17e452daf85433d75a167ae91
+          - case: pr_casefold_miss
+            key: "ctr-5f8e6a40e62a-pr-casefold"
+            restore_keys: ""
+            expected_sha: 9a7f97ac8a28f299affe52e09261baf103fd0e457be137f87b6298e36af93a3d
+          - case: pr_unicode_miss
+            key: "ctr-5f8e6a40e62a-pr-unicode\u0301"
+            restore_keys: ""
+            expected_sha: a4f40df53263b5039c81056830ab7ffd7cb8d2910f7dd385e04a3db554297866
+          - case: pr_prefix_restore
+            key: "ctr-5f8e6a40e62a-pr-prefix-missing"
+            restore_keys: "ctr-5f8e6a40e62a-pr-prefix-"
+            expected_sha: 3f5b24ce3ae0e277c026bca8ab7a4896e5f0cd23858c65d3f976a36b057e95c8
+          - case: pr_head_exact
+            key: "ctr-5f8e6a40e62a-pr-head-${{ github.event.pull_request.head.sha }}"
+            restore_keys: ""
+            expected_sha: 1af94bb5f42d287c3ba5591efb8242714fe14ea4b5d882c31d5b56c6573ba622
+          - case: pr_merge_exact
+            key: "ctr-5f8e6a40e62a-pr-merge-${{ github.sha }}"
+            restore_keys: ""
+            expected_sha: 5a64d9f45d31b3677291e4ec92e9c2c4be69bd3d75b8e820c84d536cebd257bc
+    steps:
+      - run: rm -rf "$RUNNER_TEMP/cache-boundary"
+      - id: restore
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/cache-boundary
+          key: ${{ matrix.key }}
+          restore-keys: ${{ matrix.restore_keys }}
+      - if: always()
+        shell: bash
+        env:
+          CASE: ${{ matrix.case }}
+          CACHE_KEY: ${{ matrix.key }}
+          CACHE_HIT: ${{ steps.restore.outputs.cache-hit }}
+          EXPECTED_SHA: ${{ matrix.expected_sha }}
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib
+          p=pathlib.Path(os.environ["RUNNER_TEMP"])/"cache-boundary"/"marker"
+          raw=p.read_bytes() if p.exists() and p.is_file() else b""
+          present=bool(raw)
+          actual=hashlib.sha256(raw).hexdigest() if present else None
+          expected=os.environ.get("EXPECTED_SHA") or None
+          out={"schema":"cache-trust-result/v1","case":os.environ["CASE"],"cache_hit":os.environ.get("CACHE_HIT","") or "","present":present,"file_sha256":actual,"expected_sha256":expected,"expected_match":bool(present and expected and actual==expected),"key_sha256":hashlib.sha256(os.environ["CACHE_KEY"].encode()).hexdigest(),"event":os.environ["GITHUB_EVENT_NAME"],"ref_sha256":hashlib.sha256(os.environ["GITHUB_REF"].encode()).hexdigest(),"run_attempt":int(os.environ["GITHUB_RUN_ATTEMPT"]),"raw_bytes_retained":False,"restored_bytes_executed":False}
+          print("CACHE_RESULT "+json.dumps(out,sort_keys=True,separators=(",",":")))
+          PY
+
+  reciprocal-base-to-pr:
+    if: github.event_name == 'pull_request' && contains(github.event.pull_request.title, '[reciprocal]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: rm -rf "$RUNNER_TEMP/cache-boundary"
+      - id: restore
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/cache-boundary
+          key: "ctr-5f8e6a40e62a-base-exact"
+      - if: always()
+        shell: bash
+        env:
+          CASE: reciprocal_base_to_pr
+          CACHE_KEY: "ctr-5f8e6a40e62a-base-exact"
+          CACHE_HIT: ${{ steps.restore.outputs.cache-hit }}
+          EXPECTED_SHA: bdd26530ab5752c34148d4f7571f963a3bb7dd32be49e0b3b9e909127c791d57
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib
+          p=pathlib.Path(os.environ["RUNNER_TEMP"])/"cache-boundary"/"marker"
+          raw=p.read_bytes() if p.exists() and p.is_file() else b""
+          present=bool(raw)
+          actual=hashlib.sha256(raw).hexdigest() if present else None
+          expected=os.environ.get("EXPECTED_SHA") or None
+          out={"schema":"cache-trust-result/v1","case":os.environ["CASE"],"cache_hit":os.environ.get("CACHE_HIT","") or "","present":present,"file_sha256":actual,"expected_sha256":expected,"expected_match":bool(present and expected and actual==expected),"key_sha256":hashlib.sha256(os.environ["CACHE_KEY"].encode()).hexdigest(),"event":os.environ["GITHUB_EVENT_NAME"],"ref_sha256":hashlib.sha256(os.environ["GITHUB_REF"].encode()).hexdigest(),"run_attempt":int(os.environ["GITHUB_RUN_ATTEMPT"]),"raw_bytes_retained":False,"restored_bytes_executed":False}
+          print("CACHE_RESULT "+json.dumps(out,sort_keys=True,separators=(",",":")))
+          PY
+
+  push-probe-pr:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: rm -rf "$RUNNER_TEMP/cache-boundary"
+      - id: restore
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/cache-boundary
+          key: "ctr-5f8e6a40e62a-pr-exact"
+      - if: always()
+        shell: bash
+        env:
+          CASE: push_base_reads_pr
+          CACHE_KEY: "ctr-5f8e6a40e62a-pr-exact"
+          CACHE_HIT: ${{ steps.restore.outputs.cache-hit }}
+          EXPECTED_SHA: 4e02c797212504d7f66b4d280b7b486d6c3ceaa17e452daf85433d75a167ae91
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib
+          p=pathlib.Path(os.environ["RUNNER_TEMP"])/"cache-boundary"/"marker"
+          raw=p.read_bytes() if p.exists() and p.is_file() else b""
+          present=bool(raw)
+          actual=hashlib.sha256(raw).hexdigest() if present else None
+          expected=os.environ.get("EXPECTED_SHA") or None
+          out={"schema":"cache-trust-result/v1","case":os.environ["CASE"],"cache_hit":os.environ.get("CACHE_HIT","") or "","present":present,"file_sha256":actual,"expected_sha256":expected,"expected_match":bool(present and expected and actual==expected),"key_sha256":hashlib.sha256(os.environ["CACHE_KEY"].encode()).hexdigest(),"event":os.environ["GITHUB_EVENT_NAME"],"ref_sha256":hashlib.sha256(os.environ["GITHUB_REF"].encode()).hexdigest(),"run_attempt":int(os.environ["GITHUB_RUN_ATTEMPT"]),"raw_bytes_retained":False,"restored_bytes_executed":False}
+          print("CACHE_RESULT "+json.dumps(out,sort_keys=True,separators=(",",":")))
+          PY
+
+  merge-group-probe:
+    if: github.event_name == 'merge_group'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: rm -rf "$RUNNER_TEMP/cache-boundary"
+      - id: restore
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/cache-boundary
+          key: "ctr-5f8e6a40e62a-pr-exact"
+      - if: always()
+        shell: bash
+        env:
+          CASE: merge_group_reads_pr
+          CACHE_KEY: "ctr-5f8e6a40e62a-pr-exact"
+          CACHE_HIT: ${{ steps.restore.outputs.cache-hit }}
+          EXPECTED_SHA: 4e02c797212504d7f66b4d280b7b486d6c3ceaa17e452daf85433d75a167ae91
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib
+          p=pathlib.Path(os.environ["RUNNER_TEMP"])/"cache-boundary"/"marker"
+          raw=p.read_bytes() if p.exists() and p.is_file() else b""
+          present=bool(raw)
+          actual=hashlib.sha256(raw).hexdigest() if present else None
+          expected=os.environ.get("EXPECTED_SHA") or None
+          out={"schema":"cache-trust-result/v1","case":os.environ["CASE"],"cache_hit":os.environ.get("CACHE_HIT","") or "","present":present,"file_sha256":actual,"expected_sha256":expected,"expected_match":bool(present and expected and actual==expected),"key_sha256":hashlib.sha256(os.environ["CACHE_KEY"].encode()).hexdigest(),"event":os.environ["GITHUB_EVENT_NAME"],"ref_sha256":hashlib.sha256(os.environ["GITHUB_REF"].encode()).hexdigest(),"run_attempt":int(os.environ["GITHUB_RUN_ATTEMPT"]),"raw_bytes_retained":False,"restored_bytes_executed":False}
+          print("CACHE_RESULT "+json.dumps(out,sort_keys=True,separators=(",",":")))
+          PY
